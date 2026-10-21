@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+agent_run/
+agent_run_old_*/
+*.csv
+.DS_Store
