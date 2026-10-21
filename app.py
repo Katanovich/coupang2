@@ -1,4 +1,5 @@
 import json
+import shutil
 import time
 
 import pandas as pd
@@ -214,7 +215,10 @@ if data is not None:
     if not (from_agent and running) and uploaded is not None:
         df, brands = prepare(result["results"])
         words = picked_words(df, brands)["Название продукта"].tolist()
-        if st.button(f"▶ Проверить на Coupang ({len(words)} слов)", type="primary", disabled=running or not words):
+        if shutil.which("claude") is None:  # онлайн-версия (Streamlit Cloud): нет Claude Code и Chrome
+            st.info("Проверка на Coupang работает только при запуске приложения на своём компьютере "
+                    "(./run.sh): агенту нужны Claude Code и Chrome с расширением Claude in Chrome.")
+        elif st.button(f"▶ Проверить на Coupang ({len(words)} слов)", type="primary", disabled=running or not words):
             rows = data[data[name_col].astype(str).str.strip().isin(words)]
             try:
                 browser_agent.start(rows, uploaded.name)
