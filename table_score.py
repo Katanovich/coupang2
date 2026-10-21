@@ -4,6 +4,7 @@
 поэтому оценка всегда неполная. Итог агента по свежей статистике Itemscout потом заменяет её.
 """
 
+import gzip
 import re
 from pathlib import Path
 
@@ -59,9 +60,10 @@ NAME_LIKE_KO = """
 
 
 def _dictionary() -> tuple[set[str], set[str]]:
-    """Словарь macOS: обычные слова (строчные) и имена собственные (только с заглавной: Alice, Monica)."""
+    """Словарь macOS: обычные слова (строчные) и имена собственные (только с заглавной: Alice, Monica).
+    Копия /usr/share/dict/web2 лежит в words.gz — онлайн (Streamlit Cloud, Linux) своего словаря нет."""
     try:
-        entries = Path("/usr/share/dict/words").read_text().split()
+        entries = gzip.decompress((Path(__file__).parent / "words.gz").read_bytes()).decode().split()
     except OSError:
         return set(), set()
     common = {e for e in entries if e.islower()}

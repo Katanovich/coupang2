@@ -114,6 +114,7 @@ cd ~/Desktop/ai-coding/coupang2
 | `app.py` | интерфейс (Streamlit) |
 | `scoring.py` | правила шкалы: факторы, баллы, триггеры, пороги категорий, `summarize()` |
 | `table_score.py` | оценка по колонкам выгрузки, бренды |
+| `words.gz` | копия словаря macOS (`/usr/share/dict/web2`) для проверки «похоже на бренд»; нужна онлайн-версии, где своего словаря нет |
 | `browser_agent.py` | запуск агента (Claude Code), его задание, прогресс, разбор данных Coupang, решение «подтверждено» |
 | `coupang_snippet.js` | скрипт сбора: в фоне загружает поиск и карточки товаров Coupang |
 | `table_io.py` | чтение Excel/CSV (UTF-8 / CP949), разбор чисел |
