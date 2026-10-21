@@ -108,4 +108,32 @@ window.kf_pack = async (words) => {
   return out.join('\n');
 };
 
+// Онлайн-версия (без Claude Code): все слова подряд в фоне, ход виден на самой вкладке,
+// в конце скачивается coupang_result.txt — его загружают в приложение. Кнопка на вкладке сохраняет и неполный результат.
+window.kf_run = async (words) => {
+  const lines = [];
+  document.body.innerHTML = '';
+  document.body.style.font = '16px sans-serif';
+  const status = document.body.appendChild(document.createElement('h2'));
+  const save = document.body.appendChild(document.createElement('button'));
+  save.textContent = 'Скачать coupang_result.txt';
+  const download = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/plain' }));
+    a.download = 'coupang_result.txt';
+    a.click();
+  };
+  save.onclick = download;
+  for (const [i, word] of words.entries()) {
+    status.textContent = `Coupang: слово ${i + 1} из ${words.length} — ${word}. Не закрывайте вкладку.`;
+    const out = await kf_pack([word]);
+    lines.push(out);
+    if (out.includes('ERROR|')) break;
+  }
+  const err = lines.join('\n').match(/ERROR\|(.*)/);
+  status.textContent = err ? `Остановлено: ${err[1]}. Загрузите coupang_result.txt в приложение — проверенные слова сохранены.`
+    : `Готово: ${words.length} слов. Загрузите coupang_result.txt в приложение.`;
+  download();
+};
+
 'ok';

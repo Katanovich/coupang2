@@ -62,13 +62,13 @@ def apply_coupang(df: pd.DataFrame, coupang: dict, pending: bool = False) -> pd.
     return df
 
 
-def best_table(picked: pd.DataFrame, pending: bool = False) -> None:
+def best_table(picked: pd.DataFrame, pending: bool = False, text: str | None = None) -> None:
     """Лучшие товары подтверждённых слов: просмотры, покупки, конверсия, цена, вес, габарит, сезон (нет данных — пусто)."""
     words = set(picked["Название продукта"])
     season = dict(zip(picked["Название продукта"], picked.get("Сезон", pd.Series(dtype=object))))
-    details = browser_agent.parse_details()
+    details = browser_agent.parse_details(text)
     rows = []
-    for p in browser_agent.best_products():
+    for p in browser_agent.best_products(text):
         if p["word"] not in words:
             continue
         d = details.get(p["id"], {})
@@ -101,7 +101,8 @@ def best_table(picked: pd.DataFrame, pending: bool = False) -> None:
     st.download_button("Скачать CSV — лучшие товары", best.to_csv(index=False).encode("utf-8-sig"), "best_products.csv", "text/csv")
 
 
-def render(df: pd.DataFrame, coupang: dict | None = None, pending: bool = False) -> None:
+def render(df: pd.DataFrame, coupang: dict | None = None, pending: bool = False, text: str | None = None) -> None:
+    """text — загруженный coupang_result.txt онлайн-версии (без него данные Coupang берутся из папки агента)."""
     df, brands = prepare(df)
     if df.empty:
         st.warning("Нет слов для показа.")
@@ -129,7 +130,7 @@ def render(df: pd.DataFrame, coupang: dict | None = None, pending: bool = False)
     st.dataframe(table[["Название продукта", "Итоговый балл", "Рекомендация", "Причина"]].head(5), width="stretch", hide_index=True)
 
     if coupang is not None:
-        best_table(picked, pending)
+        best_table(picked, pending, text)
         csv_words = picked.drop(columns=["_triggers", "_missing", "_brand"], errors="ignore")
         st.download_button("Скачать CSV — перспективные слова", csv_words.to_csv(index=False).encode("utf-8-sig"), "perspective_keywords.csv", "text/csv")
 
@@ -137,6 +138,22 @@ def render(df: pd.DataFrame, coupang: dict | None = None, pending: bool = False)
         detail = df.drop(columns=["_triggers", "_missing"]).rename(columns={"_brand": "Бренд"}).sort_values("Итоговый балл", ascending=False)
         st.dataframe(detail, width="stretch", hide_index=True)
         st.download_button("Скачать CSV", detail.to_csv(index=False).encode("utf-8-sig"), "analysis.csv", "text/csv")
+
+
+def online_check(words: list[str]) -> str | None:
+    """Онлайн-версия, где нет Claude Code: задание для расширения Claude in Chrome и загрузка его результата."""
+    st.subheader("Проверка на Coupang через расширение Claude in Chrome")
+    st.markdown(
+        f"1. Скопируйте задание ниже (кнопка копирования — справа вверху блока).\n"
+        f"2. В Chrome откройте боковую панель **Claude in Chrome**, вставьте задание и отправьте. "
+        f"Если расширение спросит доступ к coupang.com — разрешите.\n"
+        f"3. Сбор идёт сам на вкладке coupang.com ({len(words)} слов, около 10 секунд на слово или товар). Вкладку не закрывайте. "
+        f"В конце скачается файл **{browser_agent.RESULT_FILE}**.\n"
+        f"4. Загрузите этот файл сюда — появятся подтверждённые слова и лучшие товары."
+    )
+    st.code(browser_agent.extension_prompt(words), language="markdown", height=200)
+    result = st.file_uploader(f"Файл результата {browser_agent.RESULT_FILE}", type=["txt"])
+    return result.getvalue().decode("utf-8", errors="replace") if result is not None else None
 
 
 @st.fragment(run_every=3)
@@ -207,18 +224,27 @@ if data is not None:
         browser_agent.STATE.write_text(json.dumps(state, ensure_ascii=False))
     if checked and (err := browser_agent.error_text()):
         st.error(f"Агент остановился на Coupang: {err}")
+    # Онлайн-версия (Streamlit Cloud): нет Claude Code — проверку делает расширение, результат загружается файлом ниже
+    online = uploaded is not None and shutil.which("claude") is None
+    results_box = st.container()  # результаты — над блоком проверки, хотя файл результата загружается после него
+    online_text = None
+    if online:
+        df, brands = prepare(result["results"])
+        online_text = online_check(picked_words(df, brands)["Название продукта"].tolist())
     # Проверка на Coupang — после результатов: кнопка запуска, а пока агент работает — результаты по мере проверки и полоса прогресса
-    if from_agent and running:
-        live_run(result["results"])
-    else:
-        render(result["results"], browser_agent.parse_coupang() if checked else None)
-    if not (from_agent and running) and uploaded is not None:
+    with results_box:
+        if online_text is not None:
+            if err := browser_agent.error_text(online_text):
+                st.error(f"Сбор на Coupang остановился: {err}")
+            render(result["results"], browser_agent.parse_coupang(online_text), text=online_text)
+        elif from_agent and running:
+            live_run(result["results"])
+        else:
+            render(result["results"], browser_agent.parse_coupang() if checked else None)
+    if not (from_agent and running) and uploaded is not None and not online:
         df, brands = prepare(result["results"])
         words = picked_words(df, brands)["Название продукта"].tolist()
-        if shutil.which("claude") is None:  # онлайн-версия (Streamlit Cloud): нет Claude Code и Chrome
-            st.info("Проверка на Coupang работает только при запуске приложения на своём компьютере "
-                    "(./run.sh): агенту нужны Claude Code и Chrome с расширением Claude in Chrome.")
-        elif st.button(f"▶ Проверить на Coupang ({len(words)} слов)", type="primary", disabled=running or not words):
+        if st.button(f"▶ Проверить на Coupang ({len(words)} слов)", type="primary", disabled=running or not words):
             rows = data[data[name_col].astype(str).str.strip().isin(words)]
             try:
                 browser_agent.start(rows, uploaded.name)
