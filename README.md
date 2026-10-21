@@ -24,7 +24,9 @@
 | macOS, Python 3.10+ | приложение (Streamlit) |
 | Google Chrome | агент работает в вашем браузере |
 | Расширение **Claude in Chrome**, вход в него под вашим аккаунтом Claude | через него агент открывает страницы и читает их |
-| **Claude Code** (`claude` в терминале), вход по подписке (`claude` → `/login`) | сам агент; API-ключ не нужен |
+| **Claude Code** (`claude` в терминале; установка — https://claude.com/claude-code), вход по подписке (`claude` → `/login`) | сам агент; API-ключ не нужен |
+
+Без Claude Code, расширения и открытого Chrome приложение всё равно оценивает слова, как онлайн-версия, только без проверки на Coupang: вместо кнопки «▶ Проверить на Coupang» — подсказка.
 
 Itemscout отключать не нужно: агент работает со служебной страницы `coupang.com/robots.txt`, куда расширения не встраиваются.
 
@@ -37,6 +39,16 @@ cd ~/Desktop/ai-coding/coupang2
 ./run.sh
 ```
 
+На другом Mac сначала скачайте проект с GitHub:
+
+```bash
+cd ~/Desktop
+git clone https://github.com/Katanovich/coupang2.git
+cd coupang2
+./run.sh
+```
+
+- Во время проверки на Coupang Chrome должен быть открыт.
 - При первом запуске `run.sh` сам создаст окружение `.venv` и установит зависимости из `requirements.txt`.
 - Приложение откроется в браузере на **http://localhost:8501**. Оно доступно только с этого компьютера.
 - Остановить — `Ctrl+C` в терминале.
