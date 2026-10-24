@@ -4,3 +4,5 @@ agent_run/
 agent_run_old_*/
 *.csv
 .DS_Store
+test-results/
+.pytest_cache/

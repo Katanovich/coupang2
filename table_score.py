@@ -78,7 +78,7 @@ def _name_like(word: str) -> str | None:
     for token in re.findall(r"[a-z]{4,}", word):  # 1–3 буквы — сокращения: ph, atm, ml
         if token in GENERIC_LATIN:
             continue
-        if token in DICT_NAMES:
+        if token in DICT_NAMES and token.rstrip("s") not in DICT_COMMON:  # mats — не имя Mats, а мн. число от mat
             return f"похоже на имя или бренд: {token}"
         if DICT_COMMON and not {token, token.rstrip("s"), token[:-2]} & DICT_COMMON:
             return f"похоже на бренд: {token}"
@@ -107,7 +107,7 @@ def brand_reason(word: str, brand_flag: str | None = None) -> str | None:
         return f"бренд: {hit}"
     if MODEL_CODE.match(w):
         return "похоже на код модели бренда"
-    return _name_like(w)
+    return _name_like(word.lower())  # с пробелами: «yoga mats» — два обычных слова, а не «yogamats»
 
 
 def _col(data: pd.DataFrame, name: str):

@@ -13,6 +13,7 @@ import signal
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 
@@ -27,13 +28,14 @@ STATE = RUN_DIR / "run.json"
 
 NAME_HINTS = ("키워드", "상품명", "название", "товар", "продукт", "keyword", "product", "name")
 
-# Правила подтверждения на Coupang (те же числа зашиты в coupang_snippet.js)
+# Правила подтверждения на Coupang (те же числа — в kf_rules файла coupang_parse.js)
 LOW_REVIEWS = 170  # «слабый» конкурент — товар с отзывами не больше этого
 PRICE_MIN, PRICE_MAX = 12000, 60000  # ценовой диапазон товаров, ₩
 MIN_LOW_IN_TOP20 = 5  # сколько подходящих товаров (отзывы и цена) должно быть среди 20 первых не-рекламных
 PAGE_PRICE_MIN = 10000  # цена по прямой ссылке на товар, ₩: дешевле — товар убирается из списка
 MAX_ROCKET = 70  # доля синей ракеты в выдаче, %: с этой доли и выше слово не подтверждается
 BEST_PER_WORD = 3  # сколько лучших товаров с каждого подтверждённого слова смотреть подробно
+DAILY_CAP = 20  # новых слов в день на Coupang — вместе вручную и агентом; слова из кэша Chrome не считаются
 
 # Правило Edit(...) в Claude Code действует и на Write: запись разрешена только внутри agent_run
 ALLOWED_TOOLS = ["mcp__claude-in-chrome", "Read", "Edit(./agent_run/**)"]
@@ -42,14 +44,15 @@ PROMPT = """Ты запускаешь сбор данных с Coupang в моё
 весь сбор делает скрипт, ты только запускаешь его и записываешь ответ. Страницы не открывай и ничего на них не нажимай.
 
 1. Вызови tabs_context_mcp, создай свою вкладку и открой {start_url} — на этой вкладке и работай, больше никуда не переходи.
-2. Прочитай coupang_snippet.js и выполни его содержимое целиком через javascript_tool на этой вкладке (ответ «ok»).
+2. Прочитай coupang_parse.js и coupang_snippet.js и выполни через javascript_tool на этой вкладке содержимое каждого целиком:
+   сначала coupang_parse.js, потом coupang_snippet.js (оба ответа «ok»).
 3. Выполни javascript_tool `kf_run({words_json}, false)` (ответ «started»): сбор {count} слов идёт сам, в фоне.
 4. Повторяй javascript_tool `await kf_next()`:
    - ответ «WAIT» — слово ещё собирается (бывают перерывы на 1–2 минуты), просто вызови снова;
    - ответ начинается с «FILE pack_<номер>.txt» — запиши ответ как есть в новый файл agent_run/coupang/pack_<номер>.txt.
      Для скорости делай оба вызова в одном ответе: Write этого файла и следующий `await kf_next()`;
    - ответ «DONE» — всё собрано, переходи к шагу 5.
-   Ошибка «kf_next is not defined» или «kf_queue is not defined» — вкладка перезагрузилась: снова выполни coupang_snippet.js
+   Ошибка «kf_next is not defined» или «kf_queue is not defined» — вкладка перезагрузилась: снова выполни оба файла
    и `kf_run` только со словами, для которых ещё нет файла (номера файлов тогда начнутся с 1 — пиши в pack_r<номер>.txt).
    Ошибка «Cannot access a chrome-extension:// URL of different extension» или «timed out» — подожди 2 секунды и повтори.
 5. В конце закрой свою вкладку и ответь одной строкой: сколько файлов записано.
@@ -83,13 +86,35 @@ kf_run({words});
 """
 
 
+def _script(*names: str, comments: bool = True) -> str:
+    """Файлы JS подряд, без ответа «ok» в конце каждого (он нужен только агенту, выполняющему файлы по одному)."""
+    text = "\n\n".join((ROOT / n).read_text().strip().removesuffix("'ok';").rstrip() for n in names)
+    return text if comments else "\n".join(line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("//"))
+
+
 def extension_prompt(words: list[str]) -> str:
     """Задание для боковой панели Claude in Chrome — онлайн-версия, где нет Claude Code: скрипт сбора и слова одним блоком."""
-    script = (ROOT / "coupang_snippet.js").read_text().strip().removesuffix("'ok';").rstrip()
+    script = _script("coupang_parse.js", "coupang_snippet.js")
     return EXTENSION_PROMPT.format(
         start_url=START_URL, count=len(words), result_file=RESULT_FILE, script=script, words=json.dumps(words, ensure_ascii=False)
     )
 
+
+
+def bookmarklet() -> str:
+    """Закладка ручной проверки: читает открытую вами страницу поиска или товара Coupang, сама ничего не загружает."""
+    # Всё внутри функции: повторное нажатие не упирается в уже объявленные const; void — страница не заменяется ответом
+    return "javascript:" + quote(f"(function(){{\n{_script('coupang_parse.js', 'coupang_manual.js', comments=False)}\n}})();void 0", safe="")
+
+
+def search_url(word: str) -> str:
+    """Поиск Coupang по слову — его открываете вы сами, по ссылке из приложения."""
+    return f"https://www.coupang.com/np/search?q={quote(word)}&listSize=36"
+
+
+def is_limit(error: str | None) -> bool:
+    """Остановка из-за дневного лимита слов, а не блокировки Coupang."""
+    return bool(error) and "Дневной лимит" in error
 
 # ---------- Запуск и состояние ----------
 
