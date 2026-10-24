@@ -131,3 +131,10 @@ def test_products_csv_round_trip(discovery, tmp_path):
     path = tmp_path / "products.csv"
     discovery.to_csv(path, index=False)
     assert ba.guess_name_col(pd.read_csv(path)) == "키워드"
+
+
+def test_parse_wing_and_conversion():
+    w = ba.parse_wing("V|111|3,000|100\nV|222||\nV|bad|1|1")
+    assert w == {"111": {"views": 3000, "sold": 100}, "222": {"views": None, "sold": None}}
+    assert ba.conversion(3000, 100) == 3.33
+    assert ba.conversion(None, 100) is None and ba.conversion(3000, None) is None and ba.conversion(0, 5) is None

@@ -11,10 +11,10 @@ store.D = store.D || {};
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) {} };
 const num = n => n === '' || n == null ? '—' : Number(n).toLocaleString('ru-RU').replace(/\s/g, ' ');
 
-// «필수 표기 정보»: ячейка-заголовок «크기 / 중량 …» и значение рядом (таблица появляется, когда до неё прокрутили)
-const pageSpec = () => [...document.querySelectorAll('th, dt')]
+// «필수 표기 정보»: ячейка-заголовок «크기 / 중량 / 치수 …» и значение в соседней ячейке (на Coupang обе — td)
+const pageSpec = () => [...document.querySelectorAll('th, td, dt')]
   .map(el => [(el.textContent || '').replace(/\s+/g, ' ').trim(), (el.nextElementSibling?.textContent || '').replace(/\s+/g, ' ').trim()])
-  .filter(([t, v]) => /^(크기|중량|무게|치수|사이즈)/.test(t) && t.length < 40 && v)
+  .filter(([t, v]) => /^(크기|중량|무게|치수|사이즈)/.test(t) && t.length < 20 && v)
   .map(([t, v]) => `${t}: ${v}`).join('; ');
 
 const url = new URL(location.href);

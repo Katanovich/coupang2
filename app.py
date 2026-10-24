@@ -68,8 +68,8 @@ def best_table(picked: pd.DataFrame, pending: bool = False, text: str | None = N
     """Лучшие товары подтверждённых слов: просмотры, покупки, конверсия, цена, вес, габарит, сезон (нет данных — пусто)."""
     words = set(picked["Название продукта"])
     season = dict(zip(picked["Название продукта"], picked.get("Сезон", pd.Series(dtype=object))))
-    details = browser_agent.parse_details(text)
-    rows = []
+    details, wing = browser_agent.parse_details(text), browser_agent.parse_wing(text)
+    rows, low_conversion = [], 0
     for p in browser_agent.best_products(text):
         if p["word"] not in words:
             continue
@@ -77,15 +77,21 @@ def best_table(picked: pd.DataFrame, pending: bool = False, text: str | None = N
         price = d.get("page_price") or p["price"]
         if price and price < browser_agent.PAGE_PRICE_MIN:
             continue  # по прямой ссылке дешевле 10 000 ₩
-        views, bought = d.get("views"), d.get("bought")
+        # Просмотры и продажи — из Coupang Wing; без Wing продажи — «N명 이상 구매» со страницы товара, просмотров нет
+        w = wing.get(p["id"], {})
+        sold = w.get("sold") if w.get("sold") is not None else d.get("bought")
+        conv = browser_agent.conversion(w.get("views"), sold)
+        if conv is not None and conv <= browser_agent.MIN_CONVERSION:
+            low_conversion += 1
+            continue
         title_size = browser_agent.SIZE_RE.search(p["title"] or "")
         rows.append(
             {
                 "Ключевое слово": p["word"],
                 "Товар": p["title"],
-                "Просмотры": views,
-                "Куплено": d.get("bought_text"),
-                "Конверсия, %": round(100 * bought / views, 2) if views and bought is not None else None,
+                "Просмотры": w.get("views"),
+                "Куплено": w.get("sold") if w.get("sold") is not None else d.get("bought_text"),
+                "Конверсия, %": conv,
                 "Цена Coupang, ₩": price,
                 "Отзывы": p["reviews"],
                 "Вес": d.get("weight"),
@@ -95,6 +101,8 @@ def best_table(picked: pd.DataFrame, pending: bool = False, text: str | None = N
             }
         )
     st.subheader("Лучшие товары")
+    if low_conversion:
+        st.caption(f"Убрано товаров с конверсией {browser_agent.MIN_CONVERSION}% и ниже: {low_conversion}. Без данных о просмотрах товар остаётся, конверсия — пустая.")
     if not rows:
         st.info("Пока нет — агент ещё проверяет слова." if pending else "Подходящих товаров нет.")
         return
@@ -147,18 +155,36 @@ def show_stop(prefix: str, err: str) -> None:
     (st.info if browser_agent.is_limit(err) else st.error)(f"{prefix}: {err}")
 
 
-def coupang_check(words: list[str], auto) -> str | None:
-    """Проверка на Coupang вручную: вы открываете поиск по каждому слову, закладка читает открытую страницу.
+def coupang_check(words: list[str], auto, auto_first: bool) -> str | None:
+    """Блок проверки на Coupang. auto — автоматический сбор (агент или расширение); auto_first — он основной (есть Claude Code),
+    тогда ручная проверка закладкой — в свёрнутом блоке. Возвращает загруженный coupang_result.txt.
+    """
+    st.subheader("Проверка на Coupang")
+    if auto_first:
+        auto()
+        with st.expander("Вручную, закладкой «🔖 Coupang» — если автоматический сбор блокируется"):
+            return manual_check(words)
+    result = manual_check(words)
+    with st.expander("Автоматический сбор — может включить проверку на бота"):
+        auto()
+    return result
 
-    Coupang видит обычные просмотры, без фоновых запросов — проверка на бота не включается. auto — блок автоматического
-    сбора (агент или расширение), он теперь запасной. Возвращает загруженный coupang_result.txt.
+
+def manual_check(words: list[str]) -> str | None:
+    """Проверка вручную: вы открываете поиск по каждому слову, закладка читает открытую страницу.
+
+    Coupang видит обычные просмотры, без фоновых запросов — проверка на бота не включается. Возвращает загруженный coupang_result.txt.
     """
     cap = browser_agent.DAILY_CAP
-    st.subheader("Проверка на Coupang")
     st.markdown(
         "Вы сами открываете поиск Coupang по каждому слову, а закладка **«🔖 Coupang»** читает уже открытую страницу. "
         "Coupang видит обычные просмотры страниц, без фоновых запросов, поэтому проверка на бота не включается. "
         f"Не больше **{cap} новых слов в день** — закладка сама остановит после лимита."
+    )
+    st.caption(
+        "Цены: когда вы вошли в Coupang, выдача и карточки показывают цены с купонами вашего аккаунта (например, «웰컴백 쿠폰 적용됨») "
+        "— они бывают в разы ниже рыночных. Чтобы видеть цены обычного покупателя, проверяйте в отдельном профиле Chrome без входа в Coupang "
+        "(закладку добавьте и в нём)."
     )
     st.markdown("**1. Один раз:** перетащите кнопку на панель закладок Chrome (показать панель — ⌘⇧B).")
     bm = html.escape(browser_agent.bookmarklet())
@@ -187,8 +213,6 @@ def coupang_check(words: list[str], auto) -> str | None:
         "Записи копятся в вашем Chrome, пока вы их не очистите: можно проверять по частям, несколько дней подряд."
     )
     result = st.file_uploader(f"Файл результата {browser_agent.RESULT_FILE}", type=["txt"])
-    with st.expander("Автоматический сбор — может включить проверку на бота"):
-        auto()
     return result.getvalue().decode("utf-8", errors="replace") if result is not None else None
 
 
@@ -240,6 +264,7 @@ with st.sidebar:
         f", а синяя ракета меньше {browser_agent.MAX_ROCKET}% выдачи\n"
         f"- Товары с синей ракетой в список не попадают\n"
         f"- Товар убирается, если по прямой ссылке он дешевле {browser_agent.PAGE_PRICE_MIN // 1000} 000 ₩\n"
+        f"- В «Лучших товарах» — только конверсия выше {browser_agent.MIN_CONVERSION}% (продажи ÷ просмотры из Coupang Wing); без просмотров товар остаётся\n"
         f"- На Coupang — не больше {browser_agent.DAILY_CAP} новых слов в день"
     )
 
@@ -276,11 +301,21 @@ if data is not None:
         show_stop("Агент остановился на Coupang", err)
     results_box = st.container()  # результаты — над блоком проверки, хотя файл результата загружается после него
     result_text = None
-    # Проверка на Coupang — после результатов: вручную по закладке, запасной вариант — автоматический сбор;
-    # пока агент работает — вместо неё результаты по мере проверки и полоса прогресса
+    # Проверка на Coupang — после результатов: на этом Mac — агент сам, запасной вариант — вручную закладкой;
+    # онлайн — наоборот (агента нет); пока агент работает — вместо неё результаты по мере проверки и полоса прогресса
     if uploaded is not None and not (from_agent and running):
         df, brands = prepare(result["results"])
         words = picked_words(df, brands)["Название продукта"].tolist()
+        rows = data[data[name_col].astype(str).str.strip().isin(words)]
+        local = shutil.which("claude") is not None
+        # Новый файл — проверка на Coupang запускается сама, без кнопки. Тот же файл повторно не запускается:
+        # повтор во время блокировки Coupang только продлевает её — для этого кнопка «Проверить заново»
+        if local and words and not running and not from_agent:
+            try:
+                browser_agent.start(rows, uploaded.name)
+                st.rerun()
+            except RuntimeError as e:
+                st.error(str(e))
 
         def auto() -> None:
             # Онлайн-версия (Streamlit Cloud): нет Claude Code — сбор делает расширение по заданию
@@ -288,18 +323,21 @@ if data is not None:
                 extension_check(words)
                 return
             st.caption(
-                f"Агент Claude Code сам загружает страницы Coupang в фоне вашего Chrome, около полуминуты на слово, "
-                f"не больше {browser_agent.DAILY_CAP} новых слов в день вместе с ручной проверкой."
+                f"Проверка запускается сама после загрузки нового файла: агент Claude Code загружает страницы Coupang в фоне "
+                f"вашего Chrome (Chrome должен быть открыт), около полуминуты на слово, не больше {browser_agent.DAILY_CAP} новых слов "
+                f"в день. Слова, проверенные за последние 3 дня, берутся из памяти Chrome сразу."
             )
-            if st.button(f"▶ Проверить на Coupang ({len(words)} слов)", type="primary", disabled=running or not words):
-                rows = data[data[name_col].astype(str).str.strip().isin(words)]
+            if running and not from_agent:
+                st.info("Сейчас идёт проверка другого файла — дождитесь её конца или остановите агента.")
+            label = "▶ Проверить заново" if from_agent else "▶ Проверить на Coupang"
+            if st.button(f"{label} ({len(words)} слов)", type="primary", disabled=running or not words):
                 try:
                     browser_agent.start(rows, uploaded.name)
                     st.rerun()
                 except RuntimeError as e:
                     st.error(str(e))
 
-        result_text = coupang_check(words, auto)
+        result_text = coupang_check(words, auto, auto_first=local)
     with results_box:
         if result_text is not None:
             if err := browser_agent.error_text(result_text):

@@ -39,7 +39,7 @@ S_LINE = (
 def product_html(price: int) -> str:
     return (
         f'<html><body><h1>요가매트 상품</h1><span class="final-price-amount">{price:,}원</span><div>100명 이상</div><div>구매했어요</div>'
-        "<table><tr><th>크기</th><td>180x60cm</td><th>중량</th><td>1.2kg</td></tr></table></body></html>"
+        "<p>필수 표기 정보</p><table><tr><td>종류</td><td>요가매트</td></tr><tr><td>크기</td><td>180x60cm</td></tr><tr><td>중량</td><td>1.2kg</td></tr></table></body></html>"  # как на Coupang: подписи и значения — td
     )
 
 

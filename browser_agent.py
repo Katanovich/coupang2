@@ -35,6 +35,7 @@ MIN_LOW_IN_TOP20 = 5  # сколько подходящих товаров (от
 PAGE_PRICE_MIN = 10000  # цена по прямой ссылке на товар, ₩: дешевле — товар убирается из списка
 MAX_ROCKET = 70  # доля синей ракеты в выдаче, %: с этой доли и выше слово не подтверждается
 BEST_PER_WORD = 3  # сколько лучших товаров с каждого подтверждённого слова смотреть подробно
+MIN_CONVERSION = 2  # конверсия (продажи ÷ просмотры), %: товары с известной конверсией не выше этой в таблицу не попадают
 DAILY_CAP = 20  # новых слов в день на Coupang — вместе вручную и агентом; слова из кэша Chrome не считаются
 
 # Правило Edit(...) в Claude Code действует и на Write: запись разрешена только внутри agent_run
@@ -230,7 +231,7 @@ def _lines(kind: str, text: str | None = None) -> list[list[str]]:
         for line in f.read_text(errors="replace").splitlines():
             if line.strip().startswith(kind + "|"):
                 out.append(line.strip().split("|")[1:])
-    for f in sorted(COUPANG_DIR.glob(LEGACY[kind])):
+    for f in sorted(COUPANG_DIR.glob(LEGACY[kind])) if kind in LEGACY else ():
         text = f.read_text(errors="replace").strip()
         out += [[text]] if kind == "ERROR" else [line.strip().split("|") for line in text.splitlines() if line.strip()]
     return out
@@ -304,6 +305,22 @@ def parse_details(text: str | None = None) -> dict[str, dict]:
                 "page_price": _num(p[3]),  # цена по прямой ссылке на товар
             }
     return out
+
+
+def parse_wing(text: str | None = None) -> dict[str, dict]:
+    """Строки «V|id|просмотры|продажи» из Coupang Wing → просмотры и продажи по id товара (нет данных — None)."""
+    out = {}
+    for p in _lines("V", text):
+        p = (p + ["", ""])[:3]
+        if p[0].isdigit():
+            views, sold = _num(p[1].replace(",", "")), _num(p[2].replace(",", ""))
+            out[p[0]] = {"views": int(views) if views is not None else None, "sold": int(sold) if sold is not None else None}
+    return out
+
+
+def conversion(views: float | None, sold: float | None) -> float | None:
+    """Конверсия, %: продажи ÷ просмотры (нет просмотров или продаж — None)."""
+    return round(100 * sold / views, 2) if views and sold is not None else None
 
 
 def error_text(text: str | None = None) -> str | None:
